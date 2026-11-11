@@ -1,0 +1,34 @@
+services:
+  db:                                   # MySQL database container
+    image: mysql:8.0
+    container_name: contract_audit_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass     # dev-only password; change for real use
+      MYSQL_DATABASE: contract_audit
+    ports:
+      - "3307:3306"                     # host 3307 -> container 3306 (avoids clash with a local MySQL)
+    volumes:
+      - db_data:/var/lib/mysql          # keeps data after container restarts
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro   # auto-creates the table on first start
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:                                  # optional: the Python app in Docker too
+    profiles: ["full"]                  # only starts with: docker compose --profile full up
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: backend/.env              # API key etc.
+    environment:                        # these override the values in .env
+      DB_HOST: db                       # inside Docker, the DB is reached by service name
+      DB_PORT: "3306"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:

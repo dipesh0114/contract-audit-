@@ -1,0 +1,10 @@
+SERVICE AGREEMENT
+This Service Agreement is made on 1 April 2026 between Zenith Retail Pvt Ltd ("Client") and CloudNova Solutions ("Vendor").
+1. Services. Vendor shall provide cloud hosting and maintenance services for the Client's e-commerce platform.
+2. Fees. Client shall pay INR 18,00,000 per year, invoiced quarterly, payable within 45 days of invoice.
+3. Term. This Agreement starts on 1 April 2026 and expires on 31 March 2027. It renews automatically for one year unless either party gives notice 90 days before expiry, i.e. by 31 December 2026.
+4. Termination. Vendor may terminate at any time with 15 days notice. Client may terminate only for material breach after a 60 day cure period.
+5. Confidentiality. Each party shall keep the other's confidential information secret for 2 years.
+6. Intellectual Property. All custom work product is owned by the Vendor.
+7. Liability. Vendor's liability is unlimited. Client's liability is limited to fees paid in the last month.
+8. Governing Law. This Agreement is governed by the laws of Delaware, USA.

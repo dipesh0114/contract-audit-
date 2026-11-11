@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contract Audit AI</title>
+<style>
+ :root{--bg:#f5f6fa;--card:#fff;--text:#1d2433;--mut:#6b7385;--bd:#e2e5ee}
+ @media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b1f2a;--text:#e8ebf3;--mut:#9aa3b8;--bd:#2c3242}}
+ body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
+ main{max-width:960px;margin:auto;padding:24px}
+ .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px;margin-bottom:18px}
+ h1{font-size:22px} h2{font-size:16px;margin-top:0}
+ #drop{border:2px dashed var(--bd);border-radius:12px;padding:30px;text-align:center;color:var(--mut);cursor:pointer}
+ #drop.over{border-color:#4f6df5}
+ .badge{padding:3px 10px;border-radius:99px;font-weight:600;font-size:13px;color:#fff}
+ .High{background:#d64545}.Medium{background:#e0a020}.Low{background:#2f9e5f}
+ table{width:100%;border-collapse:collapse;font-size:14px} td,th{padding:8px;border-bottom:1px solid var(--bd);text-align:left}
+ tr.row{cursor:pointer} tr.row:hover{background:var(--bg)}
+ input[type=text]{width:70%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--text)}
+ button{padding:10px 16px;border:0;border-radius:8px;background:#4f6df5;color:#fff;cursor:pointer}
+ .msg{margin:10px 0;white-space:pre-wrap} .src{font-size:12px;color:var(--mut);border-left:3px solid var(--bd);padding-left:8px;margin-top:4px}
+ .chip{display:inline-block;background:var(--bg);color:var(--text);border:1px solid var(--bd);padding:6px 12px;border-radius:99px;margin:3px;font-size:13px;cursor:pointer}
+ .chip:hover{border-color:#4f6df5}
+ .kw{border-style:dashed}
+ .overview{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px;font-size:14px;line-height:1.6}
+ .hint{font-size:13px;color:var(--mut);margin-bottom:4px}
+ .ask{margin-top:8px;font-style:italic}
+ .user{font-weight:600}
+ #chat{max-height:420px;overflow-y:auto}
+ .pill{display:inline-block;background:var(--bg);border:1px solid var(--bd);padding:2px 8px;border-radius:6px;margin:2px;font-size:13px}
+</style></head><body><main>
+<h1>AI Contract &amp; Document Audit</h1>
+
+<div class="card"><div id="drop">Drop a contract (PDF or .txt) here or click to browse</div>
+<input type="file" id="file" accept=".pdf,.txt" hidden><div id="status"></div></div>
+
+<div class="card" id="resultCard" hidden><h2>Audit Result</h2><div id="result"></div></div>
+
+<div class="card"><h2>Data Assistant</h2>
+ <div id="overview" class="overview">Loading your data…</div>
+ <div id="chips"></div>
+ <div id="chat"></div>
+ <input type="text" id="q" placeholder="Ask anything: explain, summarize, compare, find deadlines…">
+ <button id="ask">Send</button></div>
+
+<div class="card"><h2>Audit History (MySQL)</h2>
+ <label>Filter by risk: <select id="riskFilter"><option value="">All</option>
+ <option>High</option><option>Medium</option><option>Low</option></select></label>
+ <table id="hist"></table></div>
+
+<script>
+let currentId = null;
+const $ = id => document.getElementById(id);
+// Helper: build element safely with textContent (prevents XSS from AI/contract text)
+function el(tag, text, cls){const e=document.createElement(tag); if(text!==undefined)e.textContent=text; if(cls)e.className=cls; return e;}
+
+const drop=$("drop"), fileIn=$("file");
+drop.onclick=()=>fileIn.click();
+drop.ondragover=e=>{e.preventDefault();drop.classList.add("over")};
+drop.ondragleave=()=>drop.classList.remove("over");
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove("over");upload(e.dataTransfer.files[0])};
+fileIn.onchange=()=>upload(fileIn.files[0]);
+
+async function upload(f){
+  if(!f) return;
+  $("status").textContent="Analyzing with Gemini… (10-20 seconds)";
+  try{
+    const fd=new FormData(); fd.append("file",f);
+    const r=await fetch("/api/audit",{method:"POST",body:fd});
+    const raw=await r.text();                       // read as text first: errors may not be JSON
+    let d; try{ d=JSON.parse(raw); }catch(e){ d={detail:"Server error: "+raw.slice(0,200)}; }
+    if(!r.ok){ $("status").textContent="Error: "+(typeof d.detail==="string"?d.detail:JSON.stringify(d.detail)); return; }
+    $("status").textContent="Done.";
+    show(d); loadHistory(); loadOverview();
+  }catch(e){ $("status").textContent="Error: "+e.message; }
+}
+
+function show(d){
+  currentId=d.audit_id||d.id;
+  const box=$("result"); box.replaceChildren();
+  const top=el("div"); top.append(el("span",d.risk_level+" risk · "+d.risk_score+"/100","badge "+d.risk_level)); box.append(top);
+  box.append(el("p",d.summary));
+  box.append(el("div","Vendor: "+d.vendor+"  |  Value: "+d.contract_value+"  |  Expires: "+d.expiry_date));
+  box.append(el("h2","Missing clauses"));
+  ((d.missing_clauses||[]).length?d.missing_clauses:["None"]).forEach(c=>box.append(el("span",c,"pill")));
+  box.append(el("h2","Key deadlines"));
+  (d.key_deadlines||[]).forEach(k=>box.append(el("div","• "+k.event+": "+k.date)));
+  const eb=el("button","Explain this contract with the AI"); eb.style.marginTop="10px";
+  eb.onclick=()=>send("Explain contract #"+currentId+" in simple words"); box.append(eb);
+  $("resultCard").hidden=false;
+}
+
+let convo=[];                                       // chat memory sent to the server with every message
+
+function setChips(list){                              // clickable suggestion buttons
+  const c=$("chips"); c.replaceChildren();
+  (list||[]).forEach(t=>{const b=el("button",t,"chip"); b.onclick=()=>send(t); c.append(b);});
+}
+
+async function loadOverview(){
+  try{
+    const o=await (await fetch("/api/overview")).json();
+    const box=$("overview"); box.replaceChildren();
+    if(!o.total){
+      box.append(el("div","No contracts uploaded yet. Upload one above, then ask me anything about it."));
+    }else{
+      box.append(el("div","I have "+o.total+" contract(s): "+o.by_risk.High+" High, "+o.by_risk.Medium+" Medium, "+o.by_risk.Low+" Low risk."));
+      if(o.vendors.length) box.append(el("div","Vendors: "+o.vendors.join(", ")));
+      if(o.top_missing.length) box.append(el("div","Most often missing: "+o.top_missing.map(x=>x.clause+" ("+x.count+")").join(", ")));
+      box.append(el("div","For each contract I keep: vendor, value, expiry date, risk level and score, missing clauses, deadlines, a summary and the full text.","hint"));
+    }
+    setChips(o.suggestions);
+  }catch(e){ $("overview").textContent="Could not load overview: "+e.message; }
+}
+
+function renderReply(m,d){
+  m.replaceChildren();
+  if(d.interpretation) m.append(el("div","I understood your question as: "+d.interpretation,"hint"));
+  m.append(el("div",d.answer));
+  if(d.rows&&d.rows.length){                          // the AI decided to display some contracts
+    const t=document.createElement("table"); const h=el("tr");
+    ["ID","File","Vendor","Risk","Expires"].forEach(x=>h.append(el("th",x))); t.append(h);
+    d.rows.forEach(r=>{const tr=el("tr",undefined,"row");
+      [r.id,r.filename,r.vendor,r.risk_level+" ("+r.risk_score+")",r.expiry_date].forEach(x=>tr.append(el("td",x)));
+      tr.onclick=()=>show(r); t.append(tr);}); m.append(t);
+  }
+  if(d.sources&&d.sources.length) m.append(el("div","Looked in: "+d.sources.slice(0,4).map(s=>"#"+s.id+" "+s.file).join(", "),"src"));
+  if(d.keywords&&d.keywords.length){
+    m.append(el("div","Keywords to try:","hint"));
+    d.keywords.forEach(k=>{const b=el("button",k,"chip kw"); b.onclick=()=>{$("q").value=k; $("q").focus();}; m.append(b);});
+  }
+  if(d.clarifying_question) m.append(el("div",d.clarifying_question,"ask"));
+}
+
+async function send(text){
+  text=(text||$("q").value).trim(); if(!text) return;
+  $("q").value="";
+  $("chat").append(el("div","You: "+text,"msg user"));
+  const m=el("div","Thinking…","msg"); $("chat").append(m);
+  m.scrollIntoView({behavior:"smooth",block:"nearest"});
+  try{
+    const r=await fetch("/api/assistant",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({message:text,history:convo})});
+    const raw=await r.text(); let d; try{ d=JSON.parse(raw); }catch(e){ d={detail:"Server error: "+raw.slice(0,200)}; }
+    if(!r.ok){ m.textContent="Error: "+(typeof d.detail==="string"?d.detail:JSON.stringify(d.detail)); return; }
+    renderReply(m,d);
+    convo.push({role:"user",text:text}); convo.push({role:"assistant",text:d.answer}); convo=convo.slice(-8);
+    setChips(d.suggestions);
+  }catch(e){ m.textContent="Error: "+e.message; }
+}
+$("ask").onclick=()=>send();
+$("q").addEventListener("keydown",e=>{ if(e.key==="Enter") send(); });
+
+async function loadHistory(){
+  const risk=$("riskFilter").value;  // "" means all
+  const rows=await (await fetch("/api/audits"+(risk?"?risk="+risk:""))).json();
+  const t=$("hist"); t.replaceChildren();
+  const h=el("tr"); ["ID","File","Vendor","Risk","Expires"].forEach(x=>h.append(el("th",x))); t.append(h);
+  rows.forEach(r=>{
+    const tr=el("tr",undefined,"row");
+    [r.id,r.filename,r.vendor,r.risk_level+" ("+r.risk_score+")",r.expiry_date].forEach(x=>tr.append(el("td",x)));
+    tr.onclick=()=>show(r); t.append(tr);
+  });
+}
+$("riskFilter").onchange=loadHistory;   // reload table when dropdown changes
+loadHistory();
+loadOverview();
+</script></main></body></html>
